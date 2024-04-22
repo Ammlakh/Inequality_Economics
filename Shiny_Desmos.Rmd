@@ -1,0 +1,139 @@
+---
+title: "Untitled"
+author: "Anmol Lakhotia"
+date: "2024-04-22"
+output: html_document
+---
+
+```{r}
+# Load the Shiny library to use its functions
+library(shiny)
+
+# Define the user interface (UI) for the app
+ui <- fluidPage(
+  # Title panel at the top of the UI
+  titlePanel("Dynamic Visualization of Utility Curves"),
+  
+  # Layout with sidebar and main panel
+  sidebarLayout(
+    # Sidebar with input controls
+    sidebarPanel(
+      # Header for income settings
+      tags$h3("Income Settings"),
+      numericInput("income_level", "Income Level:", value = 100, min = 2),
+      checkboxInput("toggleLevels", "Income Level Curve", value = FALSE),
+      tags$hr(),  # Horizontal line for separation
+      
+      # Header for Utility Functions
+      tags$h3("Utility Functions"),
+      checkboxInput("useexp", "Use Exponential Utility", value = FALSE),
+      checkboxInput("useComplexExp", "Use Complex Exponential Utility", value = FALSE),
+      checkboxInput("uselog", "Use Logarithmic Utility", value = FALSE),
+      checkboxInput("usegamma", "Use Gamma Utility", value = FALSE),
+      tags$hr(),
+      
+      # Conditional sliders for different utilities
+      conditionalPanel(
+        condition = "input.useexp == true && input.useComplexExp == false",
+        sliderInput("sliderA", "Income Protected for First Individual (Percentage?):", min = 0.001, max = 1, value = .001, step = 0.001)
+      ),
+      conditionalPanel(
+        condition = "input.useComplexExp == true",
+        sliderInput("sliderL", "Maximum Loss:", min = 0.05, max = 100, value = 0.05, step = 0.01)
+      ),
+      conditionalPanel(
+        condition = "input.usegamma == true",
+        sliderInput("sliderg", "gamma:", min = 0, max = 5, value = 0, step = 0.03)
+      ),
+      
+      # JavaScript to manage checkbox states and prevent simultaneous selections
+      tags$script(
+        HTML("
+          $(document).on('shiny:inputchanged', function(event) {
+            if (event.name === 'useexp' && event.value === true) {
+              $('#useComplexExp').prop('checked', false).change();
+              $('#uselog').prop('checked', false).change();
+              $('#usegamma').prop('checked', false).change();
+            } else if (event.name === 'useComplexExp' && event.value === true) {
+              $('#useexp').prop('checked', false).change();
+              $('#uselog').prop('checked', false).change();
+              $('#usegamma').prop('checked', false).change();
+            } else if (event.name === 'uselog' && event.value === true) {
+              $('#useexp').prop('checked', false).change();
+              $('#useComplexExp').prop('checked', false).change();
+              $('#usegamma').prop('checked', false).change();
+            } else if (event.name === 'usegamma' && event.value === true) {
+              $('#useexp').prop('checked', false).change();
+              $('#useComplexExp').prop('checked', false).change();
+              $('#uselog').prop('checked', false).change();
+            }
+          });
+        ")
+      )
+    ),
+    
+    # Main panel to display plots or outputs
+    mainPanel(
+      plotOutput("contourPlot")
+    )
+  )
+)
+
+# Define server logic that processes input and creates output
+server <- function(input, output, session) {
+  observe({
+    if (input$useComplexExp) {
+      updateSliderInput(session, "sliderL", max = input$income_level, min = input$income_level / 1000)
+    }
+  })
+
+  output$contourPlot <- renderPlot({
+    x <- seq(0, input$income_level * 4, length.out = 250)
+    y <- seq(0, input$income_level * 4, length.out = 250)
+
+    if (input$useexp) {
+      z <- outer(x, y, function(x, y) log(.5 * exp(-input$sliderA * x) + .5 * exp(-input$sliderA * y)) / -input$sliderA)
+    } else if (input$useComplexExp) {
+      z <- outer(x, y, function(x, y) log(2 / ((2^(x / -input$sliderL)) + (2^(y / -input$sliderL)))) * input$sliderL / log(2))
+    } else if (input$uselog) {
+      z <- outer(x, y, function(x, y) exp(log(x) + log(y)))
+    } else if (input$usegamma) {
+      z <- outer(x, y, function(x, y) ((x^(1 - input$sliderg) / 2 + y^(1 - input$sliderg) / 2)^(1 / (1 - input$sliderg))))
+    } else {
+      z <- outer(x, y, function(x, y) .5 * x + .5 * y)
+    }
+
+    if (input$toggleLevels) {
+      contour(x, y, z, levels = c(input$income_level), lwd = 2, main = if(input$useComplexExp) "Complex Exponential Utility Curves at Income Level" else if(input$useexp) "Exponential Utility Curves at Income Level" else if(input$uselog) "Logarithmic Utility Curves at Income Level" else if(input$usegamma) "Gamma Utility Curves at Income Level" else "Linear Utility Curves at Income Level")
+    } else {
+      contour(x, y, z, nlevels = 10, main = if(input$useComplexExp) "Complex Exponential Utility Curves" else if(input$useexp) "Exponential Utility Curves" else if(input$uselog)
+      "Logarithmic Utility Curves" else if(input$usegamma) "Gamma Utility Curves" else "Linear Utility Curves")
+    }
+
+    if (input$toggleLevels) {
+      if (input$useComplexExp) {
+        # Drawing asymptotes for Complex Exponential Utility
+        abline(v = input$income_level - input$sliderL, col = "darkgreen", lwd = 1, lty = 2)
+        abline(h = input$income_level - input$sliderL, col = "darkgreen", lwd = 1, lty = 2)
+        
+        # Add points at both the income level and the adjusted level by sliderL
+        points(input$income_level, input$income_level, pch = 19, col = "black", cex = 1)
+        text(input$income_level, input$income_level, labels = paste("(", input$income_level, ",", input$income_level, ")", sep = ""), pos = 4, cex = 1, col = "black")
+        
+        points(input$income_level - input$sliderL, input$income_level - input$sliderL, pch = 19, col = "darkgreen", cex = 1)
+        text(input$income_level - input$sliderL, input$income_level - input$sliderL, labels = paste("(", input$income_level - input$sliderL, ",", input$income_level - input$sliderL, ")", sep = ""), pos = 1, cex = 1, col = "darkgreen")
+        
+        # 45-degree line
+        abline(a = 0, b = 1, col = "gray", lwd = 1, lty = 2)
+        
+        # Drawing the horizontal line segment on the x-axis from u-L to u
+        segments(x0 = input$income_level - input$sliderL, y0 = 0, x1 = input$income_level, y1 = 0, col = "red", lwd = 1)
+      
+      }
+    }
+  })
+}
+
+shinyApp(ui = ui, server = server)
+```
+
