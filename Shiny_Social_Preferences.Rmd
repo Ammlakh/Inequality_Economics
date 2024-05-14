@@ -1,0 +1,187 @@
+---
+title: "Shiny_Social_Preferences"
+author: "Anmol Lakhotia"
+date: "2024-05-06"
+output: html_document
+---
+
+```{r}
+library(shiny)
+
+# Define the user interface (UI) for the app
+ui <- fluidPage(
+  # Title panel at the top of the UI
+  titlePanel("Social Preferences and Their Level Curves"),
+  
+  # Layout with sidebar and main panel
+  sidebarLayout(
+    # Sidebar with input controls
+    sidebarPanel(
+      tags$h3("Income Settings"),
+      checkboxInput("toggleLevels", "Income Level Curve", value = FALSE),
+      
+      # Only show the income level slider when toggleLevels is checked
+      conditionalPanel(
+        condition = "input.toggleLevels == true",
+        sliderInput("income_level", "Income Level:", value = 100, min = 2, max = 1000)
+      ),
+      tags$hr(),
+
+      # Header for Social Preferences
+      tags$h3("Social Preferences"),
+      checkboxInput("IN", "Inequality Neutral", value = TRUE),
+      checkboxInput("CDPI", "Constant Difference Protected Income", value = FALSE),
+      checkboxInput("CRPI", "Constant Relative Protected Income", value = FALSE),
+      checkboxInput("CPIE", "Constant Protected Income Elasticity", value = FALSE),
+      tags$hr(),
+
+      # Conditional sliders for different utilities
+      conditionalPanel(
+        condition = "input.CRPI == true && input.CDPI == false",
+        sliderInput("l", "Maximum Relative Loss:", min = 0.01, max = .99, value = .5, step = 0.001)
+      ),
+      conditionalPanel(
+        condition = "input.CDPI == true",
+        sliderInput("sliderL", "Maximum Absolute Loss (in Dollars):", min = 1, max = 1000, value = 500, step = 1)
+      ),
+      conditionalPanel(
+        condition = "input.CPIE == true",
+        sliderInput("LAM", "Protected Income Elasticity:", min = .01, max = .99, value = .01, step = 0.01), 
+        sliderInput("c", "Subsistence Income:", min = 1, max = 1000, value = 100, step = 1)
+      ),
+
+      # JavaScript to manage checkbox states and prevent simultaneous selections
+      tags$script(
+        HTML("
+          $(document).on('shiny:inputchanged', function(event) {
+            if (event.name === 'CRPI' && event.value === true) {
+              $('#CDPI').prop('checked', false).change();
+              $('#CPIE').prop('checked', false).change();
+              $('#IN').prop('checked', false).change();
+            } else if (event.name === 'CDPI' && event.value === true) {
+              $('#CRPI').prop('checked', false).change();
+              $('#CPIE').prop('checked', false).change();
+              $('#IN').prop('checked', false).change();
+            } else if (event.name === 'CPIE' && event.value === true) {
+              $('#CRPI').prop('checked', false).change();
+              $('#CDPI').prop('checked', false).change();
+              $('#IN').prop('checked', false).change();
+            } else if (event.name === 'IN' && event.value === true) {
+              $('#CRPI').prop('checked', false).change();
+              $('#CDPI').prop('checked', false).change();
+              $('#CPIE').prop('checked', false).change();
+            }
+          });
+        ")
+      )
+    ),
+    
+    # Main panel to display plots or outputs
+    mainPanel(
+      plotOutput("contourPlot", width = "600px", height = "600px") # squares it and sets the size of the plot (may need to adjust once on webpage and launched)
+    )
+  )
+)
+
+# Define server logic that processes input and creates output
+server <- function(input, output, session) {
+    # (updates max and min for A since issue at low value and max needs to make contextual sense)
+  observe({
+    # Ensure LAM is never exactly 0.5
+    if (input$LAM == 0.5) {
+      if (input$LAM < 0.5) {
+        updateSliderInput(session, "LAM", value = 0.49)
+      } else {
+        updateSliderInput(session, "LAM", value = 0.51)
+      }
+    }
+    if (input$CDPI & input$toggleLevels) {
+      updateSliderInput(session, "sliderL", max = 1000, min = input$income_level / 1000)
+    } else if(input$CPIE & input$toggleLevels) {
+      updateSliderInput(session, "income_level", min = input$c)}
+  })
+  
+  # defining x and y for plot with fixed range 0 to 1000
+  output$contourPlot <- renderPlot({
+    x <- seq(-100, 1000, length.out = 250)
+    y <- seq(-100, 1000, length.out = 250)
+
+    # Calculate z based on selected utility function
+    if (input$CRPI) {
+      x <- seq(0, 1000, length.out = 250)
+      y <- seq(0, 1000, length.out = 250)
+      z <- outer(x, y, function(x, y) (-0.5 * (-x^(1/log2(1-input$l))) - 0.5 * (-y^(1/log2(1-input$l))))^(log2(1-input$l)))
+
+    } else if (input$CDPI) {
+      z <- outer(x, y, function(x, y) log(2 / ((2^(x / -input$sliderL)) + (2^(y / -input$sliderL)))) * input$sliderL / log(2))
+    } else if (input$CPIE) {
+      z <- outer(x, y, function(x, y) input$c * exp(((log(x / input$c)^(1/log2(1 - input$LAM)) + log(y / input$c)^(1/log2(1 - input$LAM))) / 2)^(log2(1 - input$LAM))))
+    } else if (input$IN) {  # Condition updated for the renamed checkbox
+      z <- outer(x, y, function(x, y) .5 * x + .5 * y)
+    } else {
+      # If no utility function is selected, default to a blank plot or a message
+      plot.new()
+      text(0.5, 0.5, "Please select a utility function.", cex = 1.2)
+      return()
+    }
+
+    # Plot the selected utility curve
+    if (input$toggleLevels) {
+      contour(x, y, z, levels = c(input$income_level), lwd = 2, xlab = "Individual 1's income (dollars)", ylab = "Individual 2's income (dollars)", axes = TRUE, main = if(input$IN) "Inequality Neutral (IN) Preference at Income Level" else if(input$CDPI) "Constant Difference Protected Income (CDPI) Preference at Income Level" else if(input$CRPI) "Constant Relative Protected Income (CRPI) Preferences at Income Level" else if(input$CPIE) "Constant Protected Income Elasticity (CPIE) Preferences at Income Level" else "Linear Utility Preferences at Income Level")
+      abline(h = 0, v = 0, col = "black", lwd = 2, lty = 1)
+    } else {
+      contour(x, y, z, levels = c(100, 200, 300, 400, 500, 600, 700, 800, 900), xlab = "Individual 1's income (dollars)", ylab = "Individual 2's income (dollars)", axes = TRUE,  main = if(input$IN) "Inequality Neutral (IN) Preferences" else if(input$CDPI) "Constant Difference Protected Income (CDPI) Preferences" else if(input$CRPI) "Constant Relative Protected Income (CRPI) Preferences" else if(input$CPIE) "Constant Protected Income Elasticity (CPIE) Preferences" else "Linear Utility Preferences")
+      abline(h = 0, v = 0, col = "black", lwd = 2, lty = 1)
+    }
+  
+    if (input$toggleLevels) {
+      if (input$CDPI) {
+        # Drawing asymptotes for Complex Exponential Utility
+        abline(v = input$income_level - input$sliderL, col = "darkgreen", lwd = 1, lty = 2)
+        abline(h = input$income_level - input$sliderL, col = "darkgreen", lwd = 1, lty = 2)
+        # Add points at both the income level and the adjusted level by sliderL
+        points(input$income_level, input$income_level, pch = 19, col = "black", cex = 1)
+        text(input$income_level, input$income_level+35, labels = paste("(", input$income_level, ",", input$income_level, ")", sep = ""), pos = 4, cex = 1.2, col = "black")
+        points(round(input$income_level - input$sliderL, 2), round(input$income_level - input$sliderL, 2), pch = 19, col = "darkgreen", cex = 1)
+        text(round(input$income_level - input$sliderL, 2), round(input$income_level - input$sliderL, 2), labels = paste("(", round(input$income_level - input$sliderL, 2), ",", round(input$income_level - input$sliderL, 2), ")", sep = ""), pos = 1, cex = 1, col = "darkgreen")
+        # 45-degree line
+        abline(a = 0, b = 1, col = "gray", lwd = 1, lty = 2)
+        # Drawing the horizontal line segment on the x-axis from u-L to u
+        segments(x0 = input$income_level - input$sliderL, y0 = 0, x1 = input$income_level, y1 = 0, col = "red", lwd = 2)
+      
+      } else if(input$CRPI){
+        # Drawing asymptotes for Complex Exponential Utility
+        abline(v = input$income_level * input$l, col = "darkgreen", lwd = 1, lty = 2)
+        abline(h = input$income_level * input$l, col = "darkgreen", lwd = 1, lty = 2)
+        # Add points at both the income level and the adjusted level by sliderL
+        points(input$income_level, input$income_level, pch = 19, col = "black", cex = 1)
+        text(input$income_level, input$income_level+35, labels = paste("(", input$income_level, ",", input$income_level, ")", sep = ""), pos = 4, cex = 1.2, col = "black")
+        points(round(input$income_level * input$l, 2), round(input$income_level * input$l, 2), pch = 19, col = "darkgreen", cex = 1)
+        text(round(input$income_level * input$l, 2), round(input$income_level * input$l, 2), labels = paste("(", round(input$income_level * input$l, 2), ",", round(input$income_level * input$l, 2), ")", sep = ""), pos = 1, cex = 1, col = "darkgreen")        
+        # 45-degree line
+        abline(a = 0, b = 1, col = "gray", lwd = 1, lty = 2)
+        # Drawing the horizontal line segment on the x-axis from u-L to u
+        segments(x0 = input$income_level * input$l, y0 = 0, x1 = input$income_level, y1 = 0, col = "red", lwd = 2)
+                
+      } else if(input$CPIE){
+        # Drawing asymptotes for Complex Exponential Utility
+        abline(v = input$income_level^(1-input$LAM)*input$c^(input$LAM), col = "darkgreen", lwd = 1, lty = 2)
+        abline(h = input$income_level^(1-input$LAM)*input$c^(input$LAM), col = "darkgreen", lwd = 1, lty = 2)
+        # # Add points at both the income level and the adjusted level by sliderL
+         points(input$income_level, input$income_level, pch = 19, col = "black", cex = 1)
+         text(input$income_level, input$income_level+35, labels = paste("(", input$income_level, ",", input$income_level, ")", sep = ""), pos = 4, cex = 1.2, col = "black")
+         points(round(input$income_level^(1-input$LAM)*input$c^(input$LAM), 2), round(input$income_level^(1-input$LAM)*input$c^(input$LAM), 2), pch = 19, col = "darkgreen", cex = 1)
+        text(round(input$income_level^(1-input$LAM)*input$c^(input$LAM), 2), round(input$income_level^(1-input$LAM)*input$c^(input$LAM), 2), labels = paste("(", round(input$income_level^(1-input$LAM)*input$c^(input$LAM), 2), ",", round(input$income_level^(1-input$LAM)*input$c^(input$LAM), 2), ")", sep = ""), pos = 1, cex = 1, col = "darkgreen")
+        # 45-degree line
+        abline(a = 0, b = 1, col = "gray", lwd = 1, lty = 2)
+        # Drawing the horizontal line segment on the x-axis from u-L to u
+        segments(x0 = input$income_level^(1-input$LAM)*input$c^(input$LAM), y0 = 0, x1 = input$income_level, y1 = 0, col = "red", lwd = 2)
+                
+      }  
+    }
+  })
+}
+
+shinyApp(ui = ui, server = server)
+
+```
